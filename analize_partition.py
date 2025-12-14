@@ -2,6 +2,7 @@ import os
 import sys
 
 
+
 def get_extension(file_name):
     base_name = os.path.basename(file_name)
     dot_pos = base_name.rfind(".")
@@ -19,7 +20,6 @@ def get_extension(file_name):
 def scan_partition(root_path):
     total_dirs = 0
     total_files = 0
-
     stats_by_ext = {}
 
     for current_root, dir_names, file_names in os.walk(root_path):
@@ -33,6 +33,7 @@ def scan_partition(root_path):
             try:
                 file_size = os.path.getsize(full_path)
             except OSError:
+                # daca nu putem citi dimensiunea folosim 0
                 file_size = 0
 
             ext = get_extension(file_name)
@@ -142,7 +143,78 @@ def print_table(title, rows):
     print()
 
 
+def generate_charts(ext_stats, total_files, total_size, max_types=10):
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("Matplotlib nu este instalat. Graficele nu vor fi generate.")
+        return
+
+    charts_dir = "charts"
+    if not os.path.exists(charts_dir):
+        os.makedirs(charts_dir)
+
+    # sortari pentru top-uri
+    by_count = sorted(ext_stats, key=lambda e: e["count"], reverse=True)
+    by_count = add_other_bucket(by_count, total_files, total_size, max_types)
+
+    by_size = sorted(ext_stats, key=lambda e: e["size"], reverse=True)
+    by_size = add_other_bucket(by_size, total_files, total_size, max_types)
+
+    #Pie chart dupa numar de fisiere
+    labels_count = [e["ext"] for e in by_count]
+    sizes_count = [e["count"] for e in by_count]
+
+    plt.figure()
+    plt.pie(sizes_count, labels=labels_count, autopct="%1.1f%%")
+    plt.title("File type distribution by count")
+    plt.tight_layout()
+    plt.savefig(os.path.join(charts_dir, "pie_by_count.png"))
+
+    #Pie chart dupa dimensiune
+    labels_size = [e["ext"] for e in by_size]
+    sizes_size = [e["size"] for e in by_size]
+
+    plt.figure()
+    plt.pie(sizes_size, labels=labels_size, autopct="%1.1f%%")
+    plt.title("File type distribution by size")
+    plt.tight_layout()
+    plt.savefig(os.path.join(charts_dir, "pie_by_size.png"))
+
+    #Bar chart dupa numar de fisiere
+    positions_count = range(len(by_count))
+    values_count = [e["count"] for e in by_count]
+
+    plt.figure()
+    plt.bar(positions_count, values_count)
+    plt.xticks(positions_count, labels_count, rotation=45, ha="right")
+    for i, v in enumerate(values_count):
+        plt.text(i, v, str(v), ha="center", va="bottom", fontsize=8)
+    plt.ylabel("Number of files")
+    plt.title("Top file types by count")
+    plt.tight_layout()
+    plt.savefig(os.path.join(charts_dir, "bar_by_count.png"))
+
+    #Bar chart dupa dimensiune 
+    positions_size = range(len(by_size))
+    values_size = [e["size"] for e in by_size]
+
+    plt.figure()
+    plt.bar(positions_size, values_size)
+    plt.xticks(positions_size, labels_size, rotation=45, ha="right")
+    for i, v in enumerate(values_size):
+        plt.text(i, v, str(v), ha="center", va="bottom", fontsize=8)
+    plt.ylabel("Size (bytes)")
+    plt.title("Top file types by size")
+    plt.tight_layout()
+    plt.savefig(os.path.join(charts_dir, "bar_by_size.png"))
+
+    # afisam toate ferestrele cu grafice
+    plt.show()
+
+
 def print_results(total_dirs, total_files, stats_by_ext):
+
     ext_stats, total_files_checked, total_size = compute_ext_stats(stats_by_ext)
     print()
     print("Total directoare :", total_dirs)
@@ -160,6 +232,9 @@ def print_results(total_dirs, total_files, stats_by_ext):
 
     print_table("Top extensii dupa numar de fisiere:", by_count)
     print_table("Top extensii dupa dimensiune totala:", by_size)
+
+    # generam grafice
+    generate_charts(ext_stats, total_files_checked, total_size)
 
 
 def main():
