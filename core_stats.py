@@ -1,4 +1,14 @@
 import os
+import sys
+
+def safe_display_path(path):
+    text = str(path)
+    encoding = sys.stdout.encoding or "utf-8"
+    try:
+        text.encode(encoding, errors="strict")
+        return text
+    except Exception:
+        return repr(text)
 
 
 def get_extension(file_name):
@@ -20,7 +30,20 @@ def scan_partition(root_path):
     total_files = 0
     stats_by_ext = {}
 
-    for current_root, dir_names, file_names in os.walk(root_path):
+    skipped = {
+        "dirs": 0,
+        "files": 0,
+    }
+
+    def on_walk_error(err):
+        path = getattr(err, "filename", None)
+        if path:
+            print("[WARN] Nu pot accesa directorul:", safe_display_path(path))
+        else:
+            print("[WARN] Eroare la accesarea unui director:", err)
+        skipped["dirs"] += 1
+
+    for current_root, dir_names, file_names in os.walk(root_path, onerror=on_walk_error):
         total_dirs += len(dir_names)
 
         for file_name in file_names:
@@ -31,7 +54,9 @@ def scan_partition(root_path):
             try:
                 file_size = os.path.getsize(full_path)
             except OSError:
-                #daca nu putem citi dimensiunea folosim 0
+                #nu avem acces sau alta eroare la fisier
+                print("[WARN] Nu pot citi fisierul:", safe_display_path(full_path))
+                skipped["files"] += 1
                 file_size = 0
 
             ext = get_extension(file_name)
@@ -42,7 +67,7 @@ def scan_partition(root_path):
             stats_by_ext[ext]["count"] += 1
             stats_by_ext[ext]["size"] += file_size
 
-    return total_dirs, total_files, stats_by_ext
+    return total_dirs, total_files, stats_by_ext, skipped["dirs"], skipped["files"]
 
 
 def compute_ext_stats(stats_by_ext):
@@ -152,7 +177,6 @@ def generate_charts(ext_stats, total_files, total_size, max_types=10):
     if not os.path.exists(charts_dir):
         os.makedirs(charts_dir)
 
-    #sortari pentru top-uri
     by_count = sorted(ext_stats, key=lambda e: e["count"], reverse=True)
     by_count = add_other_bucket(by_count, total_files, total_size, max_types)
 
@@ -207,28 +231,31 @@ def generate_charts(ext_stats, total_files, total_size, max_types=10):
     plt.tight_layout()
     plt.savefig(os.path.join(charts_dir, "bar_by_size.png"))
 
-    #afisam toate ferestrele cu grafice
     plt.show()
 
 
-def print_results(total_dirs, total_files, stats_by_ext):
+def print_results(total_dirs, total_files, stats_by_ext, skipped_dirs, skipped_files):
     ext_stats, total_files_checked, total_size = compute_ext_stats(stats_by_ext)
+
     print()
     print("Total directoare :", total_dirs)
     print("Total fisiere    :", total_files)
     print("Dimensiune totala (bytes):", total_size)
     print()
 
-    #sortam dupa numar de fisiere
+    if skipped_dirs or skipped_files:
+        print("Elemente sarite din cauza erorilor/permisunilor:")
+        print("  Directoare sarite :", skipped_dirs)
+        print("  Fisiere sarite    :", skipped_files)
+        print()
+
     by_count = sorted(ext_stats, key=lambda e: e["count"], reverse=True)
     by_count = add_other_bucket(by_count, total_files_checked, total_size)
 
-    #sortam dupa dimensiune totala
     by_size = sorted(ext_stats, key=lambda e: e["size"], reverse=True)
     by_size = add_other_bucket(by_size, total_files_checked, total_size)
 
     print_table("Top extensii dupa numar de fisiere:", by_count)
     print_table("Top extensii dupa dimensiune totala:", by_size)
 
-    #generam grafice
     generate_charts(ext_stats, total_files_checked, total_size)
